@@ -7,153 +7,166 @@ import { compareHands } from './comparer';
 export function combinations<T>(arr: T[], k: number): T[][] {
   if (k === 0) return [[]];
   if (arr.length < k) return [];
-  const [first, ...rest] = arr;
-  const withFirst = combinations(rest, k - 1).map(combo => [first, ...combo]);
-  const withoutFirst = combinations(rest, k);
-  return [...withFirst, ...withoutFirst];
+  const [firstElement, ...remainingElements] = arr;
+  const combosWithFirst    = combinations(remainingElements, k - 1).map(combo => [firstElement, ...combo]);
+  const combosWithoutFirst = combinations(remainingElements, k);
+  return [...combosWithFirst, ...combosWithoutFirst];
 }
 
 export function rankValue(rank: Rank): number {
   return rank as number;
 }
 
-function rankGroups(cards: Card[]): RankCounts[] {
-  const map = new Map<Rank, number>();
 
-  for (const c of cards) map.set(c.rank, (map.get(c.rank) ?? 0) + 1);
-  return [...map.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0]);
+function groupCardsByRank(cards: Card[]): RankCounts[] {
+  const occurrencesByRank = new Map<Rank, number>();
+
+  for (const card of cards) {
+    occurrencesByRank.set(card.rank, (occurrencesByRank.get(card.rank) ?? 0) + 1);
+  }
+
+  return [...occurrencesByRank.entries()].sort(
+    (a, b) => b[1] - a[1] || b[0] - a[0] 
+  );
 }
 
-function detectStraightHighCard(cards: Card[]): Rank | null {
-  const sorted = [...cards].sort((a, b) => b.rank - a.rank);
-  const ranks = sorted.map(c => c.rank);
 
-  // Straight normale
-  let isNormal = true;
-  for (let i = 0; i < 4; i++) {
-    if (ranks[i] - ranks[i + 1] !== 1) { isNormal = false; break; }
-  }
-  if (isNormal) return ranks[0];
+function detectStraightHighestCard(cards: Card[]): Rank | null {
+  const sortedByRankDesc = [...cards].sort((a, b) => b.rank - a.rank);
+  const ranks = sortedByRankDesc.map(c => c.rank);
 
-  // Wheel : A-2-3-4-5 (As = 14 compté comme 1)
+  // Suite normale : chaque carte est exactement 1 de moins que la précédente
+  const isConsecutive = ranks.every((rank, i) => i === 0 || ranks[i - 1] - rank === 1);
+  if (isConsecutive) return ranks[0];
+
+  // Wheel (A-2-3-4-5) : l'As (14) compte comme un 1 sous le 2
   const rankSet = new Set(ranks);
-  if (rankSet.has(14) && rankSet.has(2) && rankSet.has(3) && rankSet.has(4) && rankSet.has(5)) {
-    return 5 
-  }
+  const isWheel = rankSet.has(14) && rankSet.has(2) && rankSet.has(3) && rankSet.has(4) && rankSet.has(5);
+  if (isWheel) return 5 as Rank; // 5-high straight
 
   return null;
 }
 
-/** Retourne les 5 cartes ordonnées pour une straight (wheel : 5,4,3,2,A) */
-function straightOrder(cards: Card[]): Card[] {
-  const sorted = [...cards].sort((a, b) => b.rank - a.rank);
-  const ranks = sorted.map(c => c.rank);
-  // Wheel
-  if (ranks[0] === 14 && ranks[1] === 5) {
-    // [A,5,4,3,2] → on veut [5,4,3,2,A]
-    return [...sorted.slice(1), sorted[0]];
+function orderStraightCards(cards: Card[]): Card[] {
+  const sortedByRankDesc = [...cards].sort((a, b) => b.rank - a.rank);
+
+  const topCard    = sortedByRankDesc[0];
+  const secondCard = sortedByRankDesc[1];
+
+  // Wheel : après tri desc on obtient [A,5,4,3,2], on déplace l'As en fin de tableau
+  const isWheelOrder = topCard.rank === 14 && secondCard.rank === 5;
+  if (isWheelOrder) {
+    const aceCard           = sortedByRankDesc[0];
+    const remainingCards    = sortedByRankDesc.slice(1);
+    return [...remainingCards, aceCard]; // → [5,4,3,2,A]
   }
-  return sorted;
+
+  return sortedByRankDesc;
 }
 
-
 export function evaluateHand5(cards: Board): HandResult {
-  const isFlush = cards.every(c => c.suit === cards[0].suit);
-  const straightHigh = detectStraightHighCard(cards);
+  const allSameSuit   = cards.every(card => card.suit === cards[0].suit);
+  const straightHigh  = detectStraightHighestCard(cards);
 
-  // --- Straight Flush ---
-  if (isFlush && straightHigh !== null) {
-    const chosen5 = straightOrder(cards);
+  // --- Straight Flush (ou Steel Wheel) ---
+  if (allSameSuit && straightHigh !== null) {
+    const chosen5 = orderStraightCards(cards);
     return { category: HandCategory.StraightFlush, chosen5 };
   }
 
-  const groups = rankGroups(cards);
-  const counts = groups.map(g => g[1]);
+  // Groupes de rangs : ex [[K,3],[A,1],[2,1]] pour trip Kings
+  const rankGroupsSorted    = groupCardsByRank(cards);
+  const groupOccurrences    = rankGroupsSorted.map(group => group[1]);
 
-  // --- Four of a Kind ---
-  if (counts[0] === 4) {
-    const quadRank = groups[0][0];
-    const kicker = groups[1][0];
+  // --- Four of a Kind : un groupe de 4 ---
+  if (groupOccurrences[0] === 4) {
+    const quadRank   = rankGroupsSorted[0][0];
+    const kickerRank = rankGroupsSorted[1][0];
     const chosen5 = [
-      ...cards.filter(c => c.rank === quadRank),
-      ...cards.filter(c => c.rank === kicker),
+      ...cards.filter(card => card.rank === quadRank),   
+      ...cards.filter(card => card.rank === kickerRank), 
     ];
     return { category: HandCategory.FourOfAKind, chosen5 };
   }
 
-  // --- Full House ---
-  if (counts[0] === 3 && counts[1] === 2) {
-    const tripRank = groups[0][0];
-    const pairRank = groups[1][0];
+  // --- Full House : un groupe de 3 + un groupe de 2 ---
+  if (groupOccurrences[0] === 3 && groupOccurrences[1] === 2) {
+    const tripletRank = rankGroupsSorted[0][0];
+    const pairRank    = rankGroupsSorted[1][0];
     const chosen5 = [
-      ...cards.filter(c => c.rank === tripRank),
-      ...cards.filter(c => c.rank === pairRank),
+      ...cards.filter(card => card.rank === tripletRank),
+      ...cards.filter(card => card.rank === pairRank), 
     ];
     return { category: HandCategory.FullHouse, chosen5 };
   }
 
-  // --- Flush ---
-  if (isFlush) {
+  // --- Flush : 5 cartes de la même couleur (pas de suite) ---
+  if (allSameSuit) {
     const chosen5 = [...cards].sort((a, b) => b.rank - a.rank);
     return { category: HandCategory.Flush, chosen5 };
   }
 
-  // --- Straight ---
+  // --- Straight : suite sans flush ---
   if (straightHigh !== null) {
-    const chosen5 = straightOrder(cards);
+    const chosen5 = orderStraightCards(cards);
     return { category: HandCategory.Straight, chosen5 };
   }
 
-  // --- Three of a Kind ---
-  if (counts[0] === 3) {
-    const tripRank = groups[0][0];
-    const kickers = groups.slice(1).map(g => g[0]).sort((a, b) => b - a);
+  // --- Three of a Kind : un groupe de 3, les autres sont des kickers ---
+  if (groupOccurrences[0] === 3) {
+    const tripletRank  = rankGroupsSorted[0][0];
+    const kickerRanks  = rankGroupsSorted.slice(1).map(g => g[0]).sort((a, b) => b - a);
     const chosen5 = [
-      ...cards.filter(c => c.rank === tripRank),
-      ...kickers.map(r => cards.find(c => c.rank === r)!),
+      ...cards.filter(card => card.rank === tripletRank),
+      ...kickerRanks.map(kickerRank => cards.find(card => card.rank === kickerRank)!),
     ];
     return { category: HandCategory.ThreeOfAKind, chosen5 };
   }
 
-  // --- Two Pair ---
-  if (counts[0] === 2 && counts[1] === 2) {
-    const highPair = groups[0][0];
-    const lowPair  = groups[1][0];
-    const kicker   = groups[2][0];
+  // --- Two Pair : deux groupes de 2 + un kicker ---
+  if (groupOccurrences[0] === 2 && groupOccurrences[1] === 2) {
+    const highPairRank = rankGroupsSorted[0][0];
+    const lowPairRank  = rankGroupsSorted[1][0];
+    const kickerRank   = rankGroupsSorted[2][0];
     const chosen5 = [
-      ...cards.filter(c => c.rank === highPair),
-      ...cards.filter(c => c.rank === lowPair),
-      cards.find(c => c.rank === kicker)!,
+      ...cards.filter(card => card.rank === highPairRank), 
+      ...cards.filter(card => card.rank === lowPairRank),  
+      cards.find(card => card.rank === kickerRank)!,       
     ];
     return { category: HandCategory.TwoPair, chosen5 };
   }
 
-  // --- One Pair ---
-  if (counts[0] === 2) {
-    const pairRank = groups[0][0];
-    const kickers = groups.slice(1).map(g => g[0]).sort((a, b) => b - a);
+  // --- One Pair : un groupe de 2 + trois kickers ---
+  if (groupOccurrences[0] === 2) {
+    const pairRank    = rankGroupsSorted[0][0];
+    const kickerRanks = rankGroupsSorted.slice(1).map(g => g[0]).sort((a, b) => b - a);
     const chosen5 = [
-      ...cards.filter(c => c.rank === pairRank),
-      ...kickers.map(r => cards.find(c => c.rank === r)!),
+      ...cards.filter(card => card.rank === pairRank),
+      ...kickerRanks.map(kickerRank => cards.find(card => card.rank === kickerRank)!),
     ];
     return { category: HandCategory.OnePair, chosen5 };
   }
 
-  // --- High Card ---
+  // --- High Card : aucune combinaison, toutes les cartes triées ---
   const chosen5 = [...cards].sort((a, b) => b.rank - a.rank);
   return { category: HandCategory.HighCard, chosen5 };
 }
 
-
 export function evaluateBest7(holeCards: HoleCards, board: Board): HandResult {
-  const allCards = [...holeCards, ...board];
-  const combos = combinations(allCards, 5) as Board[];
-  let best: HandResult | null = null;
-  for (const combo of combos) {
-    const result = evaluateHand5(combo);
-    if (best === null || compareHands(result, best) > 0) {
-      best = result;
+  const sevenCards = [...holeCards, ...board];
+  const allFiveCardCombos = combinations(sevenCards, 5) as Board[];
+
+  let bestHand: HandResult | null = null;
+
+  for (const fiveCardCombo of allFiveCardCombos) {
+    const evaluatedHand = evaluateHand5(fiveCardCombo);
+    const isFirstCombo  = bestHand === null;
+    const isBetterThanBest = !isFirstCombo && compareHands(evaluatedHand, bestHand!) > 0;
+
+    if (isFirstCombo || isBetterThanBest) {
+      bestHand = evaluatedHand;
     }
   }
-  return best!;
+
+  return bestHand!;
 }

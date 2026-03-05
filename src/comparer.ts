@@ -7,111 +7,145 @@ import { Card, HandCategory, HandResult, PlayerHand, ComparisonResult } from './
 import { evaluateBest7 } from './evaluator';
 
 
-/** Vérifie si une main Straight est un wheel (5-high) */
 function isWheelHand(hand: HandResult): boolean {
-  if (hand.category !== HandCategory.Straight && hand.category !== HandCategory.StraightFlush) return false;
-  const ranks = hand.chosen5.map(c => c.rank);
-  return ranks[ranks.length - 1] === 14 && ranks[0] === 5;
+  const isAnyKindOfStraight = hand.category === HandCategory.Straight || hand.category === HandCategory.StraightFlush;
+  if (!isAnyKindOfStraight) return false;
+
+  const ranks = hand.chosen5.map(card => card.rank);
+  // Le wheel est ordonné [5,4,3,2,A] : premier rang = 5, dernier = As (14)
+  const topCardIsFive  = ranks[0] === 5;
+  const lastCardIsAce  = ranks[ranks.length - 1] === 14;
+  return topCardIsFive && lastCardIsAce;
 }
 
-/** Compare deux séquences de rangs carte par carte (décroissant = déjà trié) */
-function compareRankSequence(a: Card[], b: Card[]): number {
-  for (let i = 0; i < Math.min(a.length, b.length); i++) {
-    if (a[i].rank !== b[i].rank) return a[i].rank - b[i].rank;
+function compareCardsByRankSequence(cardsA: Card[], cardsB: Card[]): number {
+  for (let position = 0; position < Math.min(cardsA.length, cardsB.length); position++) {
+    const rankDiff = cardsA[position].rank - cardsB[position].rank;
+    if (rankDiff !== 0) return rankDiff;
   }
-  return 0;
+  return 0; // égalité parfaite
 }
 
 
-function tieBreakStraight(a: HandResult, b: HandResult): number {
-  const wheelA = isWheelHand(a);
-  const wheelB = isWheelHand(b);
+function tieBreakStraight(handA: HandResult, handB: HandResult): number {
+  const aIsWheel = isWheelHand(handA);
+  const bIsWheel = isWheelHand(handB);
 
-  const highA = wheelA ? 5 : a.chosen5[0].rank;
-  const highB = wheelB ? 5 : b.chosen5[0].rank;
-  return highA - highB;
+  const highestCardA = aIsWheel ? 5 : handA.chosen5[0].rank;
+  const highestCardB = bIsWheel ? 5 : handB.chosen5[0].rank;
+  return highestCardA - highestCardB;
 }
 
-function tieBreakFourOfAKind(a: HandResult, b: HandResult): number {
-  const quadA = a.chosen5[0].rank;
-  const quadB = b.chosen5[0].rank;
-  if (quadA !== quadB) return quadA - quadB;
-  return a.chosen5[4].rank - b.chosen5[4].rank;
+function tieBreakFourOfAKind(handA: HandResult, handB: HandResult): number {
+  // chosen5 = [carré×4, kicker×1]
+  const quadRankA  = handA.chosen5[0].rank;
+  const quadRankB  = handB.chosen5[0].rank;
+  if (quadRankA !== quadRankB) return quadRankA - quadRankB;
+
+  const kickerRankA = handA.chosen5[4].rank;
+  const kickerRankB = handB.chosen5[4].rank;
+  return kickerRankA - kickerRankB;
 }
 
-function tieBreakFullHouse(a: HandResult, b: HandResult): number {
-  const tripA = a.chosen5[0].rank;
-  const tripB = b.chosen5[0].rank;
-  if (tripA !== tripB) return tripA - tripB;
-  return a.chosen5[3].rank - b.chosen5[3].rank;
+function tieBreakFullHouse(handA: HandResult, handB: HandResult): number {
+  // chosen5 = [triplet×3, paire×2]
+  const tripletRankA = handA.chosen5[0].rank;
+  const tripletRankB = handB.chosen5[0].rank;
+  if (tripletRankA !== tripletRankB) return tripletRankA - tripletRankB;
+
+  const pairRankA = handA.chosen5[3].rank;
+  const pairRankB = handB.chosen5[3].rank;
+  return pairRankA - pairRankB;
 }
 
-function tieBreakFlush(a: HandResult, b: HandResult): number {
-  return compareRankSequence(a.chosen5, b.chosen5);
+function tieBreakFlush(handA: HandResult, handB: HandResult): number {
+  return compareCardsByRankSequence(handA.chosen5, handB.chosen5);
 }
 
-function tieBreakThreeOfAKind(a: HandResult, b: HandResult): number {
-  const tripA = a.chosen5[0].rank;
-  const tripB = b.chosen5[0].rank;
-  if (tripA !== tripB) return tripA - tripB;
-  const k1 = a.chosen5[3].rank - b.chosen5[3].rank;
-  if (k1 !== 0) return k1;
-  return a.chosen5[4].rank - b.chosen5[4].rank;
+function tieBreakThreeOfAKind(handA: HandResult, handB: HandResult): number {
+  // chosen5 = [triplet×3, kicker1, kicker2]
+  const tripletRankA = handA.chosen5[0].rank;
+  const tripletRankB = handB.chosen5[0].rank;
+  if (tripletRankA !== tripletRankB) return tripletRankA - tripletRankB;
+
+  const firstKickerDiff  = handA.chosen5[3].rank - handB.chosen5[3].rank;
+  if (firstKickerDiff !== 0) return firstKickerDiff;
+
+  const secondKickerDiff = handA.chosen5[4].rank - handB.chosen5[4].rank;
+  return secondKickerDiff;
 }
 
-function tieBreakTwoPair(a: HandResult, b: HandResult): number {
-  const hp = a.chosen5[0].rank - b.chosen5[0].rank;
-  if (hp !== 0) return hp;
-  const lp = a.chosen5[2].rank - b.chosen5[2].rank;
-  if (lp !== 0) return lp;
-  return a.chosen5[4].rank - b.chosen5[4].rank;
+function tieBreakTwoPair(handA: HandResult, handB: HandResult): number {
+  // chosen5 = [hautePaire×2, bassePaire×2, kicker]
+  const highPairDiff = handA.chosen5[0].rank - handB.chosen5[0].rank;
+  if (highPairDiff !== 0) return highPairDiff;
+
+  const lowPairDiff  = handA.chosen5[2].rank - handB.chosen5[2].rank;
+  if (lowPairDiff !== 0) return lowPairDiff;
+
+  const kickerDiff   = handA.chosen5[4].rank - handB.chosen5[4].rank;
+  return kickerDiff;
 }
 
-function tieBreakOnePair(a: HandResult, b: HandResult): number {
-  const pairDiff = a.chosen5[0].rank - b.chosen5[0].rank;
-  if (pairDiff !== 0) return pairDiff;
-  const k1 = a.chosen5[2].rank - b.chosen5[2].rank;
-  if (k1 !== 0) return k1;
-  const k2 = a.chosen5[3].rank - b.chosen5[3].rank;
-  if (k2 !== 0) return k2;
-  return a.chosen5[4].rank - b.chosen5[4].rank;
+function tieBreakOnePair(handA: HandResult, handB: HandResult): number {
+  // chosen5 = [paire×2, kicker1, kicker2, kicker3]
+  const pairRankDiff     = handA.chosen5[0].rank - handB.chosen5[0].rank;
+  if (pairRankDiff !== 0) return pairRankDiff;
+
+  const firstKickerDiff  = handA.chosen5[2].rank - handB.chosen5[2].rank;
+  if (firstKickerDiff !== 0) return firstKickerDiff;
+
+  const secondKickerDiff = handA.chosen5[3].rank - handB.chosen5[3].rank;
+  if (secondKickerDiff !== 0) return secondKickerDiff;
+
+  const thirdKickerDiff  = handA.chosen5[4].rank - handB.chosen5[4].rank;
+  return thirdKickerDiff;
 }
 
-function tieBreakHighCard(a: HandResult, b: HandResult): number {
-  return compareRankSequence(a.chosen5, b.chosen5);
+function tieBreakHighCard(handA: HandResult, handB: HandResult): number {
+  return compareCardsByRankSequence(handA.chosen5, handB.chosen5);
 }
 
-export function compareHands(a: HandResult, b: HandResult): number {
-  if (a.category !== b.category) return a.category - b.category;
 
-  switch (a.category) {
-    case HandCategory.StraightFlush: return tieBreakStraight(a, b);
-    case HandCategory.FourOfAKind:   return tieBreakFourOfAKind(a, b);
-    case HandCategory.FullHouse:     return tieBreakFullHouse(a, b);
-    case HandCategory.Flush:         return tieBreakFlush(a, b);
-    case HandCategory.Straight:      return tieBreakStraight(a, b);
-    case HandCategory.ThreeOfAKind:  return tieBreakThreeOfAKind(a, b);
-    case HandCategory.TwoPair:       return tieBreakTwoPair(a, b);
-    case HandCategory.OnePair:       return tieBreakOnePair(a, b);
-    case HandCategory.HighCard:      return tieBreakHighCard(a, b);
+export function compareHands(handA: HandResult, handB: HandResult): number {
+  // Catégories différentes : la catégorie la plus haute gagne directement
+  if (handA.category !== handB.category) return handA.category - handB.category;
+
+  // Même catégorie : on applique le tie-break spécifique
+  switch (handA.category) {
+    case HandCategory.StraightFlush: return tieBreakStraight(handA, handB);
+    case HandCategory.FourOfAKind:   return tieBreakFourOfAKind(handA, handB);
+    case HandCategory.FullHouse:     return tieBreakFullHouse(handA, handB);
+    case HandCategory.Flush:         return tieBreakFlush(handA, handB);
+    case HandCategory.Straight:      return tieBreakStraight(handA, handB);
+    case HandCategory.ThreeOfAKind:  return tieBreakThreeOfAKind(handA, handB);
+    case HandCategory.TwoPair:       return tieBreakTwoPair(handA, handB);
+    case HandCategory.OnePair:       return tieBreakOnePair(handA, handB);
+    case HandCategory.HighCard:      return tieBreakHighCard(handA, handB);
   }
 }
 
 
 export function compareAllPlayers(players: PlayerHand[]): ComparisonResult {
-  const hands: HandResult[] = players.map(p => evaluateBest7(p.holeCards, p.board));
+  // Évaluer la meilleure main de chaque joueur
+  const evaluatedHands: HandResult[] = players.map(player =>
+    evaluateBest7(player.holeCards, player.board)
+  );
 
-  // Trouver la meilleure main
-  let best = hands[0];
-  for (let i = 1; i < hands.length; i++) {
-    if (compareHands(hands[i], best) > 0) best = hands[i];
+  // Trouver la meilleure main parmi tous les joueurs
+  let bestHand = evaluatedHands[0];
+  for (let playerIndex = 1; playerIndex < evaluatedHands.length; playerIndex++) {
+    const currentHand = evaluatedHands[playerIndex];
+    if (compareHands(currentHand, bestHand) > 0) {
+      bestHand = currentHand;
+    }
   }
 
-  // Tous les joueurs à égalité avec le meilleur
-  const winners = hands
-    .map((h, i) => ({ h, i }))
-    .filter(({ h }) => compareHands(h, best) === 0)
-    .map(({ i }) => i);
+  // Collecter tous les joueurs à égalité avec la meilleure main (split pot)
+  const winnerIndices = evaluatedHands
+    .map((hand, playerIndex) => ({ hand, playerIndex }))
+    .filter(({ hand }) => compareHands(hand, bestHand) === 0)
+    .map(({ playerIndex }) => playerIndex);
 
-  return { winners, hands };
+  return { winners: winnerIndices, hands: evaluatedHands };
 }
