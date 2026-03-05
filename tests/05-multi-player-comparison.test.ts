@@ -86,15 +86,13 @@ describe('Multi-player comparison (compareAllPlayers)', () => {
     it('two tied players beat the third', () => {
       const board: Board = [
         createCard(ACE, 'clubs'), createCard(KING, 'diamonds'), createCard(QUEEN, 'hearts'),
-        createCard(JACK, 'spades'), createCard(TEN, 'clubs'),
+        createCard(JACK, 'spades'), createCard(TWO, 'clubs'),
       ];
 
-      // P1 & P2: board broadway straight plays for both
-      const p2 : PlayerHand = { holeCards: [createCard(FOUR, 'spades'), createCard(FIVE, 'hearts')], board };
-      const p1 : PlayerHand = { holeCards: [createCard(TWO, 'clubs'), createCard(THREE, 'diamonds')], board };
-      // P3: has 9 which can't improve on the straight
-      
+      const p1 : PlayerHand = { holeCards: [createCard(TEN, 'clubs'), createCard(THREE, 'diamonds')], board };
+      const p2 : PlayerHand = { holeCards: [createCard(TEN, 'spades'), createCard(FIVE, 'hearts')], board };
       const p3 : PlayerHand = { holeCards: [createCard(NINE, 'clubs'), createCard(EIGHT, 'diamonds')], board };
+
       const result = compareAllPlayers([p1, p2, p3]);
       expect(result.winners).toHaveLength(2);
       expect(result.winners).toContain(0);

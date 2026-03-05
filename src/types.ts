@@ -2,6 +2,8 @@ export type Suit = 'clubs' | 'diamonds' | 'hearts' | 'spades';
 
 export type Rank = 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14;
 
+export type RankCounts = [Rank, number];
+
 export type Board = [Card, Card, Card, Card, Card];
 
 export type HoleCards = [Card, Card];
